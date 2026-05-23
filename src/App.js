@@ -1,119 +1,212 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-export default function EMDRDirectionApp() {
-  const { useEffect, useMemo, useRef, useState } = React;
+import React, { useEffect, useRef, useState } from "react";
 
-  const directions = useMemo(
-    () => [
-      "上",
-      "下",
-      "左",
-      "右",
-      "左上",
-      "左下",
-      "右上",
-      "右下",
-      "顺时针",
-      "逆时针",
-    ],
-    []
-  );
-
+export default function StandardEMDRApp() {
   const [running, setRunning] = useState(false);
-  const [intervalMs, setIntervalMs] = useState(1500);
-  const [current, setCurrent] = useState("准备开始");
-  const timerRef = useRef(null);
-  const synthRef = useRef(
-    typeof window !== "undefined" ? window.speechSynthesis : null
-  );
+  const [speed, setSpeed] = useState(6);
+  const [dotSize, setDotSize] = useState(72);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [fullscreen, setFullscreen] = useState(false);
 
-  const speak = (text) => {
-    if (!synthRef.current) return;
-    synthRef.current.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = "zh-CN";
-    utterance.rate = 0.9;
-    synthRef.current.speak(utterance);
-  };
+  const containerRef = useRef(null);
+  const animationRef = useRef(null);
+  const audioContextRef = useRef(null);
 
-  const nextInstruction = () => {
-    const idx = Math.floor(Math.random() * directions.length);
-    const cmd = directions[idx];
-    setCurrent(cmd);
-    speak(cmd);
+  const positionRef = useRef(0);
+  const directionRef = useRef(1);
+  const lastSideRef = useRef("left");
+
+  const [dotX, setDotX] = useState(0);
+
+  const playClick = (side) => {
+    if (!soundEnabled) return;
+
+    try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext ||
+          window.webkitAudioContext)();
+      }
+
+      const ctx = audioContextRef.current;
+      const oscillator = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      const panner = ctx.createStereoPanner();
+
+      oscillator.type = "sine";
+      oscillator.frequency.value = 880;
+
+      panner.pan.value = side === "left" ? -1 : 1;
+
+      gainNode.gain.setValueAtTime(0.0001, ctx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.08, ctx.currentTime + 0.01);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.08);
+
+      oscillator.connect(gainNode);
+      gainNode.connect(panner);
+      panner.connect(ctx.destination);
+
+      oscillator.start();
+      oscillator.stop(ctx.currentTime + 0.1);
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   useEffect(() => {
-    if (running) {
-      nextInstruction();
-      timerRef.current = setInterval(nextInstruction, intervalMs);
+    if (!running) {
+      cancelAnimationFrame(animationRef.current);
+      return;
     }
 
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [running, intervalMs]);
+    const animate = () => {
+      const container = containerRef.current;
+      if (!container) return;
 
-  const stop = () => {
-    setRunning(false);
-    if (timerRef.current) clearInterval(timerRef.current);
-    synthRef.current?.cancel();
-    setCurrent("已停止");
+      const width = container.offsetWidth;
+      const padding = dotSize;
+      const minX = padding;
+      const maxX = width - padding;
+
+      positionRef.current += directionRef.current * speed;
+
+      if (positionRef.current >= maxX) {
+        positionRef.current = maxX;
+        directionRef.current = -1;
+
+        if (lastSideRef.current !== "right") {
+          playClick("right");
+          lastSideRef.current = "right";
+        }
+      }
+
+      if (positionRef.current <= minX) {
+        positionRef.current = minX;
+        directionRef.current = 1;
+
+        if (lastSideRef.current !== "left") {
+          playClick("left");
+          lastSideRef.current = "left";
+        }
+      }
+
+      setDotX(positionRef.current);
+      animationRef.current = requestAnimationFrame(animate);
+    };
+
+    animationRef.current = requestAnimationFrame(animate);
+
+    return () => cancelAnimationFrame(animationRef.current);
+  }, [running, speed, dotSize, soundEnabled]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const width = container.offsetWidth;
+    positionRef.current = width / 2;
+    setDotX(width / 2);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    const el = containerRef.current;
+
+    if (!document.fullscreenElement) {
+      await el?.requestFullscreen?.();
+      setFullscreen(true);
+    } else {
+      await document.exitFullscreen?.();
+      setFullscreen(false);
+    }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
-      <div className="w-full max-w-2xl bg-white rounded-3xl shadow-xl p-8 space-y-6">
-        <h1 className="text-3xl font-bold text-center">
-          EMDR 随机眼动语音训练
-        </h1>
-        <p className="text-center text-gray-600">
-          随机播报：上下左右、四个斜角、顺时针、逆时针
-        </p>
-
-        <div className="rounded-3xl border p-10 text-center">
-          <div className="text-sm text-gray-500 mb-2">当前指令</div>
-          <div className="text-6xl font-semibold tracking-wide">{current}</div>
+    <div
+      ref={containerRef}
+      className="relative w-screen h-screen overflow-hidden bg-black"
+    >
+      <div className="absolute top-0 left-0 right-0 z-20 p-6 flex flex-wrap gap-4 items-center justify-between bg-gradient-to-b from-black/80 to-transparent">
+        <div>
+          <h1 className="text-white text-3xl font-bold">标准 EMDR 横向追踪</h1>
+          <p className="text-gray-300 text-sm mt-1">
+            让眼睛持续跟随移动光点，不要转动头部
+          </p>
         </div>
 
-        <div className="space-y-2">
-          <label className="block text-sm font-medium">播报间隔（毫秒）</label>
-          <input
-            type="range"
-            min="800"
-            max="4000"
-            step="100"
-            value={intervalMs}
-            onChange={(e) => setIntervalMs(Number(e.target.value))}
-            className="w-full"
-          />
-          <div className="text-center text-gray-600">{intervalMs} ms</div>
-        </div>
+        <div className="flex flex-wrap gap-3 items-center">
+          <button
+            onClick={() => setRunning((v) => !v)}
+            className="px-5 py-3 rounded-2xl bg-white text-black font-medium"
+          >
+            {running ? "暂停" : "开始"}
+          </button>
 
-        <div className="flex gap-4 justify-center">
           <button
-            onClick={() => setRunning(true)}
-            disabled={running}
-            className="px-6 py-3 rounded-2xl bg-black text-white disabled:opacity-50"
+            onClick={toggleFullscreen}
+            className="px-5 py-3 rounded-2xl border border-white/30 text-white"
           >
-            开始
+            {fullscreen ? "退出全屏" : "全屏模式"}
           </button>
+
           <button
-            onClick={stop}
-            className="px-6 py-3 rounded-2xl border border-gray-300"
+            onClick={() => setSoundEnabled((v) => !v)}
+            className="px-5 py-3 rounded-2xl border border-white/30 text-white"
           >
-            停止
-          </button>
-          <button
-            onClick={nextInstruction}
-            className="px-6 py-3 rounded-2xl border border-gray-300"
-          >
-            下一条
+            {soundEnabled ? "声音开启" : "声音关闭"}
           </button>
         </div>
+      </div>
 
-        <div className="text-sm text-gray-500 leading-6">
-          建议在安静、安全的环境中使用。如果你正在和专业治疗师一起做
-          EMDR，可以把节奏调慢到 1500–2500ms，方便眼球追随和情绪稳定。
+      <div className="absolute inset-0 flex items-center justify-center">
+        <div className="absolute w-full h-[2px] bg-white/10" />
+
+        <div
+          className="absolute rounded-full bg-cyan-400 shadow-[0_0_60px_rgba(34,211,238,0.9)]"
+          style={{
+            width: `${dotSize}px`,
+            height: `${dotSize}px`,
+            left: `${dotX - dotSize / 2}px`,
+            transition: "none",
+          }}
+        />
+      </div>
+
+      <div className="absolute bottom-0 left-0 right-0 z-20 p-6 bg-gradient-to-t from-black/80 to-transparent">
+        <div className="max-w-3xl mx-auto space-y-4">
+          <div>
+            <div className="flex justify-between text-sm text-gray-300 mb-2">
+              <span>移动速度</span>
+              <span>{speed}</span>
+            </div>
+            <input
+              type="range"
+              min="2"
+              max="20"
+              step="1"
+              value={speed}
+              onChange={(e) => setSpeed(Number(e.target.value))}
+              className="w-full"
+            />
+          </div>
+
+          <div>
+            <div className="flex justify-between text-sm text-gray-300 mb-2">
+              <span>光点大小</span>
+              <span>{dotSize}px</span>
+            </div>
+            <input
+              type="range"
+              min="32"
+              max="120"
+              step="4"
+              value={dotSize}
+              onChange={(e) => setDotSize(Number(e.target.value))}
+              className="w-full"
+            />
+          </div>
+
+          <div className="text-sm text-gray-400 leading-6">
+            标准 EMDR 通常使用左右规律移动的视觉刺激，配合双侧声音或触觉刺激。
+            建议在大屏幕、平视距离和低干扰环境中使用。若出现明显不适、眩晕或情绪失控，应立即停止。
+          </div>
         </div>
       </div>
     </div>
